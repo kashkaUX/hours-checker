@@ -26,8 +26,6 @@
 <pre id="results"></pre>
 
 <script>
-const PROXY = "https://fetch-hours-site.sankowskak.workers.dev/?url=";
-
 window.runCheck = async function () {
 
   const file = document.getElementById("fileInput").files[0];
@@ -41,7 +39,9 @@ window.runCheck = async function () {
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-  const json = XLSX.utils.sheet_to_json(sheet);
+
+  // 👉 raw rows (no headers)
+  const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
   const start = new Date(startDate);
 
@@ -68,107 +68,41 @@ window.runCheck = async function () {
     return t;
   }
 
-  // ✅ FIXED extractor (all months)
-  function extract(html) {
-    const match = html.match(/const\s+text\w+\s*=\s*`([\s\S]*?)`/);
-    if (!match) return {};
-
-    const monthMap = {
-      January:0, February:1, March:2, April:3,
-      May:4, June:5, July:6, August:7,
-      September:8, October:9, November:10, December:11
-    };
-
-    let result = {};
-
-    match[1].split("\n").forEach(line => {
-      const [datePart, time] = line.split(" - ");
-      if (!datePart || !time) return;
-
-      const m = datePart.match(/(\d+)[a-z]{2}\s+(\w+)/i);
-      if (!m) return;
-
-      const day = parseInt(m[1]);
-      const month = monthMap[m[2]];
-      if (month === undefined) return;
-
-      const d = new Date(2026, month, day);
-      const key = d.toLocaleDateString("en-GB");
-
-      result[key] = time.trim();
-    });
-
-    return result;
-  }
-
-  async function fetchStore(url) {
-    const res = await fetch(PROXY + encodeURIComponent(url));
-    const html = await res.text();
-
-    // debug (optional)
-    console.log("HTML snippet:", html.slice(0, 300));
-
-    return extract(html);
-  }
-
-  // ✅ Add more stores here later
-  const urls = {
-    "Grafton St": "https://www.brownthomas.com/dublin-hours.html"
-  };
-
   let output = "";
-  let checked = 0;
 
-  for (let store in urls) {
+  // skip header row → start at 1
+  for (let i = 1; i < rows.length; i++) {
 
-    const site = await fetchStore(urls[store]);
-    console.log("SITE DATA:", site);
+    const row = rows[i];
 
-    for (let i = 0; i < 7; i++) {
+    if (!row[2]) continue; // no date
+
+    let excelDate = new Date(row[2]);
+    const excelKey = formatDate(excelDate);
+
+    for (let j = 0; j < 7; j++) {
 
       let d = new Date(start);
-      d.setDate(d.getDate() + i);
+      d.setDate(d.getDate() + j);
 
-      const date = formatDate(d);
+      const targetDate = formatDate(d);
 
-      // ✅ robust Excel date match
-      const row = json.find(r => {
+      if (excelKey !== targetDate) continue;
 
-        let excelDate;
+      const grafton =
+        `${normalizeTime(row[3])}-${normalizeTime(row[4])}`;
 
-        if (typeof r["Date"] === "number") {
-          const parsed = XLSX.SSF.parse_date_code(r["Date"]);
-          excelDate = new Date(parsed.y, parsed.m - 1, parsed.d);
-        } else {
-          excelDate = new Date(r["Date"]);
-        }
+      const dundrum =
+        `${normalizeTime(row[5])}-${normalizeTime(row[6])}`;
 
-        return excelDate.getDate() === d.getDate() &&
-               excelDate.getMonth() === d.getMonth() &&
-               excelDate.getFullYear() === d.getFullYear();
-      });
-
-      if (!row) continue;
-
-      checked++;
-
-      const sheetTime =
-        `${normalizeTime(row[store + " Open"])}-${normalizeTime(row[store + " Close"])}`;
-
-      const siteTime = site[date];
-
-      if (!siteTime) {
-        output += `${date} ${store} ❌ missing on site\n`;
-      } else if (sheetTime !== siteTime) {
-        output += `${date} ${store} ❌ sheet: ${sheetTime} | site: ${siteTime}\n`;
-      }
+      output += `${targetDate}\n`;
+      output += `  Grafton St: ${grafton}\n`;
+      output += `  Dundrum:    ${dundrum}\n\n`;
     }
   }
 
-  if (checked === 0) {
-    output = "⚠️ No matching rows found — check Excel date format";
-  } else if (!output) {
-    output = "✅ No differences";
+  if (!output) {
+    output = "⚠️ No matching rows found (date mismatch still)";
   }
 
   document.getElementById("results").innerText = output;
