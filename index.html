@@ -115,6 +115,9 @@ window.runCheck = async function () {
 
       const date = formatDate(d);
 
+      console.log("Looking for:", date);
+      console.log("Available dates:", json.map(r => r["Date"]));
+
   const row = json.find(r => {
   let excelDate;
 
