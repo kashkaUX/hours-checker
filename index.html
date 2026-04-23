@@ -1,7 +1,35 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Store Hours Checker</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    table { border-collapse: collapse; margin-top: 20px; width: 100%; }
+    td, th { border: 1px solid #ccc; padding: 8px; }
+    .diff { background: #ffdddd; }
+    .missing { background: #fff3cd; }
+  </style>
+</head>
+<body>
+
+<h2>Store Hours Checker</h2>
+
+<input type="file" id="fileInput" />
+<br><br>
+
+<label>Start Date:</label>
+<input type="date" id="startDate" />
+<br><br>
+
+<button onclick="runCheck()">Check</button>
+
+<div id="results"></div>
+
 <script>
 const PROXY = "https://YOUR-WORKER.workers.dev?url=";
 
-// ✅ Make function GLOBAL
 window.runCheck = async function () {
 
   const file = document.getElementById("fileInput").files[0];
@@ -104,3 +132,6 @@ window.runCheck = async function () {
   document.getElementById("results").innerText = output || "✅ No differences";
 };
 </script>
+
+</body>
+</html>
