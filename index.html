@@ -6,10 +6,8 @@
 
   <style>
     body { font-family: Arial; padding: 20px; }
-    table { border-collapse: collapse; margin-top: 20px; width: 100%; }
-    td, th { border: 1px solid #ccc; padding: 8px; }
-    .diff { background: #ffdddd; }
-    .missing { background: #fff3cd; }
+    .diff { color: red; }
+    .ok { color: green; }
   </style>
 </head>
 <body>
@@ -25,7 +23,7 @@
 
 <button onclick="runCheck()">Check</button>
 
-<div id="results"></div>
+<pre id="results"></pre>
 
 <script>
 const PROXY = "https://fetch-hours-site.sankowskak.workers.dev/?url=";
@@ -70,9 +68,16 @@ window.runCheck = async function () {
     return t;
   }
 
+  // ✅ FIXED extractor (all months)
   function extract(html) {
     const match = html.match(/const\s+text\w+\s*=\s*`([\s\S]*?)`/);
     if (!match) return {};
+
+    const monthMap = {
+      January:0, February:1, March:2, April:3,
+      May:4, June:5, July:6, August:7,
+      September:8, October:9, November:10, December:11
+    };
 
     let result = {};
 
@@ -84,10 +89,13 @@ window.runCheck = async function () {
       if (!m) return;
 
       const day = parseInt(m[1]);
-      const monthMap = { April: 3 };
+      const month = monthMap[m[2]];
+      if (month === undefined) return;
 
-      const d = new Date(2026, monthMap[m[2]], day);
-      result[formatDate(d)] = time.trim();
+      const d = new Date(2026, month, day);
+      const key = d.toLocaleDateString("en-GB");
+
+      result[key] = time.trim();
     });
 
     return result;
@@ -96,44 +104,57 @@ window.runCheck = async function () {
   async function fetchStore(url) {
     const res = await fetch(PROXY + encodeURIComponent(url));
     const html = await res.text();
+
+    // debug (optional)
+    console.log("HTML snippet:", html.slice(0, 300));
+
     return extract(html);
   }
 
+  // ✅ Add more stores here later
   const urls = {
     "Grafton St": "https://www.brownthomas.com/dublin-hours.html"
   };
 
   let output = "";
+  let checked = 0;
 
   for (let store in urls) {
 
     const site = await fetchStore(urls[store]);
+    console.log("SITE DATA:", site);
 
     for (let i = 0; i < 7; i++) {
+
       let d = new Date(start);
       d.setDate(d.getDate() + i);
 
       const date = formatDate(d);
 
-      console.log("Looking for:", date);
-      console.log("Available dates:", json.map(r => r["Date"]));
+      // ✅ robust Excel date match
+      const row = json.find(r => {
 
-  const row = json.find(r => {
-  let excelDate;
+        let excelDate;
 
-  if (typeof r["Date"] === "number") {
-    excelDate = XLSX.SSF.parse_date_code(r["Date"]);
-    excelDate = new Date(excelDate.y, excelDate.m - 1, excelDate.d);
-  } else {
-    excelDate = new Date(r["Date"]);
-  }
+        if (typeof r["Date"] === "number") {
+          const parsed = XLSX.SSF.parse_date_code(r["Date"]);
+          excelDate = new Date(parsed.y, parsed.m - 1, parsed.d);
+        } else {
+          excelDate = new Date(r["Date"]);
+        }
 
-  const formatted = excelDate.toLocaleDateString("en-GB");
-  return formatted === date;
-});
+        return excelDate.getDate() === d.getDate() &&
+               excelDate.getMonth() === d.getMonth() &&
+               excelDate.getFullYear() === d.getFullYear();
+      });
+
       if (!row) continue;
 
-      const sheetTime = `${normalizeTime(row[store + " Open"])}-${normalizeTime(row[store + " Close"])}`;
+      checked++;
+
+      const sheetTime =
+        `${normalizeTime(row[store + " Open"])}-${normalizeTime(row[store + " Close"])}`;
+
       const siteTime = site[date];
 
       if (!siteTime) {
@@ -144,7 +165,13 @@ window.runCheck = async function () {
     }
   }
 
-  document.getElementById("results").innerText = output || "✅ No differences";
+  if (checked === 0) {
+    output = "⚠️ No matching rows found — check Excel date format";
+  } else if (!output) {
+    output = "✅ No differences";
+  }
+
+  document.getElementById("results").innerText = output;
 };
 </script>
 
