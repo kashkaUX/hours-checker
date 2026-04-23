@@ -115,7 +115,19 @@ window.runCheck = async function () {
 
       const date = formatDate(d);
 
-      const row = json.find(r => r["Date"] === date);
+  const row = json.find(r => {
+  let excelDate;
+
+  if (typeof r["Date"] === "number") {
+    excelDate = XLSX.SSF.parse_date_code(r["Date"]);
+    excelDate = new Date(excelDate.y, excelDate.m - 1, excelDate.d);
+  } else {
+    excelDate = new Date(r["Date"]);
+  }
+
+  const formatted = excelDate.toLocaleDateString("en-GB");
+  return formatted === date;
+});
       if (!row) continue;
 
       const sheetTime = `${normalizeTime(row[store + " Open"])}-${normalizeTime(row[store + " Close"])}`;
