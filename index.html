@@ -6,7 +6,7 @@
 </head>
 <body>
 
-<h2>Excel Debug (No Site Yet)</h2>
+<h2>Excel Debug (Fixed Columns)</h2>
 
 <input type="file" id="fileInput" />
 <br><br>
@@ -34,7 +34,7 @@ window.runCheck = async function () {
   const workbook = XLSX.read(data);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
-  // RAW rows (no headers)
+  // raw rows (no headers)
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
   const start = new Date(startDate);
@@ -62,7 +62,7 @@ window.runCheck = async function () {
     return t;
   }
 
-  // ✅ robust Excel date parser
+  // robust Excel date parser
   function parseExcelDate(value) {
     if (!value) return null;
 
@@ -72,29 +72,32 @@ window.runCheck = async function () {
       return new Date(d.y, d.m - 1, d.d);
     }
 
-    // String like 24/4/2026 or 24/04/26
+    // String date (dd/mm/yyyy or dd/mm/yy)
     if (typeof value === "string") {
       const parts = value.split(/[\/\-]/);
       if (parts.length === 3) {
         let [day, month, year] = parts.map(Number);
-
         if (year < 100) year += 2000;
-
         return new Date(year, month - 1, day);
       }
     }
+
+    // fallback (sometimes Excel already gives Date object)
+    const d = new Date(value);
+    if (!isNaN(d)) return d;
 
     return null;
   }
 
   let output = "";
+  let matchesFound = 0;
 
-  // Loop through sheet
+  // loop through sheet rows
   for (let i = 1; i < rows.length; i++) {
 
     const row = rows[i];
 
-    if (!row[2]) continue; // Column C = date
+    if (!row[2]) continue; // column C = date
 
     const excelDate = parseExcelDate(row[2]);
 
@@ -102,17 +105,20 @@ window.runCheck = async function () {
 
     if (!excelDate) continue;
 
-    const excelKey = formatDate(excelDate);
-
-    // Compare against 7-day window
+    // compare against 7-day window
     for (let j = 0; j < 7; j++) {
 
       let d = new Date(start);
       d.setDate(d.getDate() + j);
 
-      const targetDate = formatDate(d);
+      const sameDate =
+        excelDate.getDate() === d.getDate() &&
+        excelDate.getMonth() === d.getMonth() &&
+        excelDate.getFullYear() === d.getFullYear();
 
-      if (excelKey !== targetDate) continue;
+      if (!sameDate) continue;
+
+      matchesFound++;
 
       const grafton =
         `${normalizeTime(row[3])}-${normalizeTime(row[4])}`;
@@ -120,14 +126,14 @@ window.runCheck = async function () {
       const dundrum =
         `${normalizeTime(row[5])}-${normalizeTime(row[6])}`;
 
-      output += `${targetDate}\n`;
+      output += `${formatDate(d)}\n`;
       output += `  Grafton St: ${grafton}\n`;
       output += `  Dundrum:    ${dundrum}\n\n`;
     }
   }
 
-  if (!output) {
-    output = "⚠️ No matching rows found (date parsing still wrong)";
+  if (matchesFound === 0) {
+    output = "⚠️ No matching rows found — Excel date format still not recognised";
   }
 
   document.getElementById("results").innerText = output;
