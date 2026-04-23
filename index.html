@@ -1,18 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Store Hours Checker</title>
+  <title>Store Hours Checker (Debug)</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
-
-  <style>
-    body { font-family: Arial; padding: 20px; }
-    .diff { color: red; }
-    .ok { color: green; }
-  </style>
 </head>
 <body>
 
-<h2>Store Hours Checker</h2>
+<h2>Excel Debug (No Site Yet)</h2>
 
 <input type="file" id="fileInput" />
 <br><br>
@@ -40,7 +34,7 @@ window.runCheck = async function () {
   const workbook = XLSX.read(data);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
 
-  // 👉 raw rows (no headers)
+  // RAW rows (no headers)
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
   const start = new Date(startDate);
@@ -68,18 +62,49 @@ window.runCheck = async function () {
     return t;
   }
 
+  // ✅ robust Excel date parser
+  function parseExcelDate(value) {
+    if (!value) return null;
+
+    // Excel serial number
+    if (typeof value === "number") {
+      const d = XLSX.SSF.parse_date_code(value);
+      return new Date(d.y, d.m - 1, d.d);
+    }
+
+    // String like 24/4/2026 or 24/04/26
+    if (typeof value === "string") {
+      const parts = value.split(/[\/\-]/);
+      if (parts.length === 3) {
+        let [day, month, year] = parts.map(Number);
+
+        if (year < 100) year += 2000;
+
+        return new Date(year, month - 1, day);
+      }
+    }
+
+    return null;
+  }
+
   let output = "";
 
-  // skip header row → start at 1
+  // Loop through sheet
   for (let i = 1; i < rows.length; i++) {
 
     const row = rows[i];
 
-    if (!row[2]) continue; // no date
+    if (!row[2]) continue; // Column C = date
 
-    let excelDate = new Date(row[2]);
+    const excelDate = parseExcelDate(row[2]);
+
+    console.log("RAW:", row[2], "→ PARSED:", excelDate);
+
+    if (!excelDate) continue;
+
     const excelKey = formatDate(excelDate);
 
+    // Compare against 7-day window
     for (let j = 0; j < 7; j++) {
 
       let d = new Date(start);
@@ -102,7 +127,7 @@ window.runCheck = async function () {
   }
 
   if (!output) {
-    output = "⚠️ No matching rows found (date mismatch still)";
+    output = "⚠️ No matching rows found (date parsing still wrong)";
   }
 
   document.getElementById("results").innerText = output;
