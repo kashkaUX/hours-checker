@@ -1,12 +1,12 @@
 <!DOCTYPE html>
 <html>
 <head>
-  <title>Store Hours Checker (Debug)</title>
+  <title>Store Hours Checker</title>
   <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
 </head>
 <body>
 
-<h2>Excel Debug 2 (Fixed Columns)</h2>
+<h2>Store Hours Checker v2</h2>
 
 <input type="file" id="fileInput" />
 <br><br>
@@ -20,6 +20,8 @@
 <pre id="results"></pre>
 
 <script>
+const PROXY = "https://fetch-hours-site.sankowskak.workers.dev/?url=";
+
 window.runCheck = async function () {
 
   const file = document.getElementById("fileInput").files[0];
@@ -33,8 +35,6 @@ window.runCheck = async function () {
   const data = await file.arrayBuffer();
   const workbook = XLSX.read(data);
   const sheet = workbook.Sheets[workbook.SheetNames[0]];
-
-  // raw rows (no headers)
   const rows = XLSX.utils.sheet_to_json(sheet, { header: 1 });
 
   const start = new Date(startDate);
@@ -43,36 +43,29 @@ window.runCheck = async function () {
     return d.toLocaleDateString("en-GB");
   }
 
+  // ✅ Excel time fix
   function normalizeTime(t) {
-  if (t === undefined || t === null || t === "") return "";
+    if (t === undefined || t === null || t === "") return "";
 
-  // ✅ Excel numeric time (fraction of day)
-  if (typeof t === "number") {
-    const totalMinutes = Math.round(t * 24 * 60);
-    const hours = Math.floor(totalMinutes / 60);
-    const minutes = totalMinutes % 60;
+    if (typeof t === "number") {
+      const totalMinutes = Math.round(t * 24 * 60);
+      const hours = Math.floor(totalMinutes / 60);
+      const minutes = totalMinutes % 60;
+      return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+    }
 
-    return `${String(hours).padStart(2, "0")}:${String(minutes).padStart(2, "0")}`;
+    return t.toString().trim();
   }
 
-  // fallback (string)
-  return t.toString().trim();
-}
-
-    return t;
-  }
-
-  // robust Excel date parser
+  // ✅ Excel date fix
   function parseExcelDate(value) {
     if (!value) return null;
 
-    // Excel serial number
     if (typeof value === "number") {
       const d = XLSX.SSF.parse_date_code(value);
       return new Date(d.y, d.m - 1, d.d);
     }
 
-    // String date (dd/mm/yyyy or dd/mm/yy)
     if (typeof value === "string") {
       const parts = value.split(/[\/\-]/);
       if (parts.length === 3) {
@@ -82,58 +75,113 @@ window.runCheck = async function () {
       }
     }
 
-    // fallback (sometimes Excel already gives Date object)
     const d = new Date(value);
-    if (!isNaN(d)) return d;
-
-    return null;
+    return isNaN(d) ? null : d;
   }
 
+  // ✅ Site extractor (all months)
+  function extract(html) {
+    const match = html.match(/const\s+text\w+\s*=\s*`([\s\S]*?)`/);
+    if (!match) return {};
+
+    const monthMap = {
+      January:0, February:1, March:2, April:3,
+      May:4, June:5, July:6, August:7,
+      September:8, October:9, November:10, December:11
+    };
+
+    let result = {};
+
+    match[1].split("\n").forEach(line => {
+      const [datePart, time] = line.split(" - ");
+      if (!datePart || !time) return;
+
+      const m = datePart.match(/(\d+)[a-z]{2}\s+(\w+)/i);
+      if (!m) return;
+
+      const day = parseInt(m[1]);
+      const month = monthMap[m[2]];
+      if (month === undefined) return;
+
+      const d = new Date(2026, month, day);
+      const key = formatDate(d);
+
+      result[key] = time.trim();
+    });
+
+    return result;
+  }
+
+  async function fetchStore(url) {
+    const res = await fetch(PROXY + encodeURIComponent(url));
+    const html = await res.text();
+    return extract(html);
+  }
+
+  // 👉 Add more stores here later
+  const stores = {
+    "Grafton St": {
+      url: "https://www.brownthomas.com/dublin-hours.html",
+      openCol: 3,
+      closeCol: 4
+    },
+    "Dundrum": {
+      url: "https://www.brownthomas.com/dundrum-hours.html",
+      openCol: 5,
+      closeCol: 6
+    }
+  };
+
   let output = "";
-  let matchesFound = 0;
+  let checked = 0;
 
-  // loop through sheet rows
-  for (let i = 1; i < rows.length; i++) {
+  for (let storeName in stores) {
 
-    const row = rows[i];
+    const store = stores[storeName];
+    const siteData = await fetchStore(store.url);
 
-    if (!row[2]) continue; // column C = date
+    for (let i = 1; i < rows.length; i++) {
 
-    const excelDate = parseExcelDate(row[2]);
+      const row = rows[i];
+      if (!row[2]) continue;
 
-    console.log("RAW:", row[2], "→ PARSED:", excelDate);
+      const excelDate = parseExcelDate(row[2]);
+      if (!excelDate) continue;
 
-    if (!excelDate) continue;
+      for (let j = 0; j < 7; j++) {
 
-    // compare against 7-day window
-    for (let j = 0; j < 7; j++) {
+        let d = new Date(start);
+        d.setDate(d.getDate() + j);
 
-      let d = new Date(start);
-      d.setDate(d.getDate() + j);
+        const sameDate =
+          excelDate.getDate() === d.getDate() &&
+          excelDate.getMonth() === d.getMonth() &&
+          excelDate.getFullYear() === d.getFullYear();
 
-      const sameDate =
-        excelDate.getDate() === d.getDate() &&
-        excelDate.getMonth() === d.getMonth() &&
-        excelDate.getFullYear() === d.getFullYear();
+        if (!sameDate) continue;
 
-      if (!sameDate) continue;
+        checked++;
 
-      matchesFound++;
+        const dateStr = formatDate(d);
 
-      const grafton =
-        `${normalizeTime(row[3])}-${normalizeTime(row[4])}`;
+        const sheetTime =
+          `${normalizeTime(row[store.openCol])}-${normalizeTime(row[store.closeCol])}`;
 
-      const dundrum =
-        `${normalizeTime(row[5])}-${normalizeTime(row[6])}`;
+        const siteTime = siteData[dateStr];
 
-      output += `${formatDate(d)}\n`;
-      output += `  Grafton St: ${grafton}\n`;
-      output += `  Dundrum:    ${dundrum}\n\n`;
+        if (!siteTime) {
+          output += `${dateStr} ${storeName} ❌ missing on site\n`;
+        } else if (sheetTime !== siteTime) {
+          output += `${dateStr} ${storeName} ❌ sheet: ${sheetTime} | site: ${siteTime}\n`;
+        }
+      }
     }
   }
 
-  if (matchesFound === 0) {
-    output = "⚠️ No matching rows found — Excel date format still not recognised";
+  if (checked === 0) {
+    output = "⚠️ No matching rows found";
+  } else if (!output) {
+    output = "✅ No differences";
   }
 
   document.getElementById("results").innerText = output;
