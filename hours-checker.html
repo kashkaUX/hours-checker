@@ -1,0 +1,255 @@
+<!DOCTYPE html>
+<html>
+<head>
+  <title>Store Hours Checker</title>
+  <script src="https://cdn.jsdelivr.net/npm/xlsx/dist/xlsx.full.min.js"></script>
+
+  <style>
+    body { font-family: Arial; padding: 20px; }
+    table { border-collapse: collapse; margin-top: 20px; width: 100%; }
+    td, th { border: 1px solid #ccc; padding: 8px; }
+    .diff { background: #ffdddd; }
+    .missing { background: #fff3cd; }
+  </style>
+</head>
+<body>
+
+<h2>Store Hours Checker</h2>
+
+<input type="file" id="fileInput" />
+<br><br>
+
+<label>Start Date:</label>
+<input type="date" id="startDate" />
+<br><br>
+
+<button onclick="runCheck()">Check</button>
+
+<div id="results"></div>
+
+<script>
+const urlMap = {
+  "Grafton St": [
+    "https://www.brownthomas.com/dublin-hours.html",
+    "https://www.arnotts.ie/dublin-hours.html"
+  ],
+  "Dundrum": [
+    "https://www.brownthomas.com/dundrum-hours.html",
+    "https://www.arnotts.ie/dundrum-hours.html"
+  ],
+  "Cork": [
+    "https://www.brownthomas.com/cork-hours.html",
+    "https://www.arnotts.ie/cork-hours.html"
+  ],
+  "Limerick": [
+    "https://www.brownthomas.com/limerick-hours.html",
+    "https://www.arnotts.ie/limerick-hours.html"
+  ],
+  "Galway": [
+    "https://www.brownthomas.com/galway-hours.html",
+    "https://www.arnotts.ie/galway-hours.html"
+  ],
+  "Blanchardstown": [
+    "https://www.brownthomas.com/blanchardstown-hours.html",
+    "https://www.arnotts.ie/blanchardstown-hours.html"
+  ],
+  "Planet Beauty": [
+    "https://www.brownthomas.com/planet-beauty-clarendon-hours.html"
+  ],
+  "Arnotts": [
+    "https://www.brownthomas.com/arnotts-hours.html",
+    "https://www.arnotts.ie/arnotts-hours.html"
+  ]
+};
+
+// ✅ Normalize time formats (FIXES YOUR BUG)
+function normalizeTime(timeStr) {
+  if (!timeStr) return "";
+
+  timeStr = timeStr.toString().trim();
+
+  // Excel format: 9:00:00 PM
+  const ampmMatch = timeStr.match(/(\d+):(\d+)(?::\d+)?\s*(AM|PM)/i);
+  if (ampmMatch) {
+    let hours = parseInt(ampmMatch[1]);
+    let minutes = ampmMatch[2];
+    const period = ampmMatch[3].toUpperCase();
+
+    if (period === "PM" && hours !== 12) hours += 12;
+    if (period === "AM" && hours === 12) hours = 0;
+
+    return `${String(hours).padStart(2, "0")}:${minutes}`;
+  }
+
+  // Already 24h
+  const simpleMatch = timeStr.match(/^(\d{1,2}):(\d{2})$/);
+  if (simpleMatch) {
+    return `${simpleMatch[1].padStart(2, "0")}:${simpleMatch[2]}`;
+  }
+
+  return timeStr;
+}
+
+function formatDate(d) {
+  return d.toLocaleDateString("en-GB");
+}
+
+function getNext7Days(start) {
+  return Array.from({length: 7}, (_, i) => {
+    let d = new Date(start);
+    d.setDate(d.getDate() + i);
+    return d;
+  });
+}
+
+// ✅ Extract hours from JS blocks
+function extractAllHours(html) {
+  const matches = [...html.matchAll(/const\s+text\w+\s*=\s*`([\s\S]*?)`/g)];
+  let result = {};
+
+  matches.forEach(match => {
+    const lines = match[1].split("\n");
+
+    lines.forEach(line => {
+      const [datePart, time] = line.split(" - ");
+      if (!datePart || !time) return;
+
+      const m = datePart.match(/(\d+)[a-z]{2}\s+(\w+)/i);
+      if (!m) return;
+
+      const day = parseInt(m[1]);
+      const monthName = m[2];
+
+      const monthMap = {
+        January:0, February:1, March:2, April:3,
+        May:4, June:5, July:6, August:7,
+        September:8, October:9, November:10, December:11
+      };
+
+      const date = new Date(2026, monthMap[monthName], day);
+      const formatted = formatDate(date);
+
+      result[formatted] = time.trim();
+    });
+  });
+
+  return result;
+}
+
+const PROXY = "https://fetch-hours-site.sankowskak.workers.dev/?url=";
+
+async function fetchStoreHours(url) {
+  try {
+    const res = await fetch(PROXY + encodeURIComponent(url));
+
+    console.log("Proxy fetch:", url, res.status);
+
+    if (!res.ok) {
+      console.warn("Bad response:", url);
+      return {};
+    }
+
+    const html = await res.text();
+
+    const extracted = extractAllHours(html);
+
+    console.log("Extracted:", extracted);
+
+    return extracted;
+
+  } catch (e) {
+    console.error("Fetch failed:", url, e);
+    return {};
+  }
+}
+  try {
+    const res = await fetch(url);
+    const html = await res.text();
+    return extractAllHours(html);
+  } catch (e) {
+    console.warn("Failed:", url);
+    return {};
+  }
+}
+
+async function runCheck() {
+  const file = document.getElementById("fileInput").files[0];
+  const startDate = document.getElementById("startDate").value;
+
+  if (!file || !startDate) {
+    alert("Upload file and select date");
+    return;
+  }
+
+  const data = await file.arrayBuffer();
+  const workbook = XLSX.read(data);
+  const sheet = workbook.Sheets[workbook.SheetNames[0]];
+  const json = XLSX.utils.sheet_to_json(sheet);
+
+  const dates = getNext7Days(new Date(startDate)).map(formatDate);
+
+  let table = `<table>
+    <tr>
+      <th>Date</th>
+      <th>Store</th>
+      <th>Sheet</th>
+      <th>Site</th>
+      <th>Status</th>
+    </tr>`;
+
+  for (let store in urlMap) {
+
+    let combinedHours = {};
+
+    for (let url of urlMap[store]) {
+      const hours = await fetchStoreHours(url);
+      combinedHours = {...combinedHours, ...hours};
+    }
+
+    dates.forEach(date => {
+      const row = json.find(r => r["Date"] === date);
+      if (!row) return;
+
+      const open = row[store + " Open"];
+      const close = row[store + " Close"];
+      if (!open || !close) return;
+
+      const sheetTime = `${normalizeTime(open)}-${normalizeTime(close)}`;
+
+      const siteRaw = combinedHours[date];
+      const siteTime = siteRaw
+        ? siteRaw.split("-").map(normalizeTime).join("-")
+        : null;
+
+      let cls = "";
+      let status = "";
+
+      if (!siteTime) {
+        cls = "missing";
+        status = "Missing on site";
+      } else if (sheetTime !== siteTime) {
+        cls = "diff";
+        status = "Mismatch";
+      } else {
+        return; // skip matches
+      }
+
+      table += `
+        <tr class="${cls}">
+          <td>${date}</td>
+          <td>${store}</td>
+          <td>${sheetTime}</td>
+          <td>${siteTime || "-"}</td>
+          <td>${status}</td>
+        </tr>
+      `;
+    });
+  }
+
+  table += `</table>`;
+  document.getElementById("results").innerHTML = table;
+}
+</script>
+
+</body>
+</html>
